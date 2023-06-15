@@ -20,13 +20,15 @@ class Dueling_net(nn.Module):
         self.to(device)
 
     def forward(self, state):
-        x = T.relu(self.fc1(state))
+        obs = state['observation'].cuda()
+        action_mask = state['mask'].cuda()
+        x = T.relu(self.fc1(obs))
 
         V = self.V(x)
         A_1 = self.A_1(x)
         A_2 = self.A_2(x)
 
-        return V, A_1, A_2
+        return V, A_1 * action_mask, A_2
 
     def save_checkpoint(self, checkpoint_file):
         T.save(self.state_dict(), checkpoint_file, _use_new_zipfile_serialization=False)
