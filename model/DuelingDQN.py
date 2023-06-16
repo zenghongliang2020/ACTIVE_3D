@@ -8,13 +8,13 @@ from RelayBuffer import Replaybuffer
 device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
 
 class Dueling_net(nn.Module):
-    def __init__(self, alpha, state_dim, action_1_dim, action_2_dim):
+    def __init__(self, alpha, state_dim, action_coor_dim, action_angle_dim):
         super(Dueling_net, self).__init__()
 
         self.fc1 = nn.Linear(state_dim, 256)
         self.V = nn.Linear(256, 1)
-        self.A_1 = nn.Linear(256, action_1_dim)
-        self.A_2 = nn.Linear(256, action_2_dim)
+        self.A_1 = nn.Linear(256, action_coor_dim)
+        self.A_2 = nn.Linear(256, action_angle_dim)
 
         self.optimizer = optim.Adam(self.parameters(), lr=alpha)
         self.to(device)
@@ -82,6 +82,8 @@ class DuelingDQN:
         self.epsilon = self.epsilon - self.eps_dec \
             if self.epsilon > self.eps_min else self.eps_min
 
+    def remember(self, state, action, reward, state_, done):
+        self.memory.store_transition(state, action, reward, state_, done)
 
     def learn(self):
         if not self.memory.ready():

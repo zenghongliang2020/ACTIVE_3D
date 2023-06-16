@@ -97,3 +97,47 @@ class EncoderBlock(nn.Module):
         self.ffn = Position_Ecoding(ffn_num_input, ffn_num_hiddens, num_hiddens)
         self.addnorm2 = AddNorm(norm_shape, dropout)
 
+
+class PositionalEncoding(nn.Module):
+    """Positional encoding.
+
+    Defined in :numref:`sec_self-attention-and-positional-encoding`"""
+    def __init__(self, num_hiddens, dropout, max_len=1000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(dropout)
+        # Create a long enough `P`
+        self.P = torch.zeros((1, max_len, num_hiddens))
+        X = torch.arange(max_len, dtype=torch.float32).reshape(
+            -1, 1) / torch.pow(10000, torch.arange(
+            0, num_hiddens, 2, dtype=torch.float32) / num_hiddens)
+        self.P[:, :, 0::2] = torch.sin(X)
+        self.P[:, :, 1::2] = torch.cos(X)
+
+    def forward(self, X):
+        X = X + self.P[:, :X.shape[1], :].to(X.device)
+        return self.dropout(X)
+
+class TransformerEncoder(nn.Module):
+    def __init__(self, vocab_size, key_size, query_size, value_size,
+                 num_hiddens, norm_shape, ffn_num_input, ffn_num_hiddens,
+                 num_heads, num_layers, dropout, use_bias=False, **kwargs):
+        super(TransformerEncoder, self).__init__(**kwargs)
+        self.num_hiddens = num_hiddens
+        self.embedding = nn.Embedding(vocab_size, num_hiddens)
+        self.pos_encoding = PositionalEncoding(num_hiddens, dropout)
+        self.blks = nn.Sequential()
+        for i in range(num_layers):
+            self.blks.add_module("block" + str(i),
+                EncoderBlock(key_size, query_size, value_size, num_hiddens,
+                             norm_shape, ffn_num_input, ffn_num_hiddens,
+                             num_heads, dropout, use_bias))
+
+    def forward(self, X, valid_lens, *args):
+        X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
+        self.attention_weights = [None] * len(self.blks)
+        for i, blk in enumerate(self.blks):
+            X = blk(X, valid_lens)
+            self.attention_weights[i] = blk.attention.attention.attention_weights
+        return X
+
+

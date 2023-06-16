@@ -16,7 +16,7 @@ def main():
     for episode in range(args.max_episodes):
         total_reward = 0
         done = False
-        observation = env.resrt()
+        observation = env.reset()
         while not done:
             action_1, action_2 = agent.choose_action(observation, isTrain=True)
             observation_, reward, done, info = env.step(action_1, action_2)
