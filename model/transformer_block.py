@@ -35,13 +35,14 @@ class Dotproduct_Attention(nn.Module):
     """
     def __init__(self, dropout, **kwargs):
         super(Dotproduct_Attention, self).__init__(**kwargs)
-        self.dropout = dropout
+        self.dropout = nn.Dropout(dropout)
 
-    def forward(self, queries, keys, values, valid_lens=None):
+    def forward(self, queries, keys, values):
         d = queries.shape[-1]
         scores = torch.bmm(queries, keys.transpose(1, 2)) / math.sqrt(d)
-        self.attention_weights = nn.functional.softmax(scores)
+        self.attention_weights = nn.functional.softmax(scores, dim=-1)
         return torch.bmm(self.dropout(self.attention_weights), values)
+
 
 
 class MultiHead_Attention(nn.Module):
@@ -62,14 +63,15 @@ class MultiHead_Attention(nn.Module):
         keys = transpose_qkv(self.W_k(keys), self.num_heads)
         values = transpose_qkv(self.W_v(values), self.num_heads)
 
+
         output = self.attention(queries, keys, values)
         output_concat = transpose_output(output, self.num_heads)
         return self.W_o(output_concat)
 
 
-class Position_Ecoding(nn.Module):
+class PositionWiseFFN(nn.Module):
     def __init__(self, num_imput, num_hiddens, num_outputs, **kwargs):
-        super(Position_Ecoding, self).__init__(**kwargs)
+        super(PositionWiseFFN, self).__init__()
         self.dense1 = nn.Linear(num_imput, num_hiddens)
         self.relu = nn.ReLU()
         self.dense2 = nn.Linear(num_hiddens, num_outputs)
@@ -94,8 +96,12 @@ class EncoderBlock(nn.Module):
         self.attention = MultiHead_Attention(key_size, query_size, value_size,
                                              num_hiddens, num_heads, dropout, use_bias)
         self.addnorm1 = AddNorm(norm_shape, dropout)
-        self.ffn = Position_Ecoding(ffn_num_input, ffn_num_hiddens, num_hiddens)
+        self.ffn = PositionWiseFFN(ffn_num_input, ffn_num_hiddens, num_hiddens)
         self.addnorm2 = AddNorm(norm_shape, dropout)
+
+    def forward(self, x):
+        Y = self.addnorm1(x, self.attention(x, x, x))
+        return self.addnorm2(Y, self.ffn(Y))
 
 
 class PositionalEncoding(nn.Module):
@@ -118,13 +124,12 @@ class PositionalEncoding(nn.Module):
         return self.dropout(X)
 
 class TransformerEncoder(nn.Module):
-    def __init__(self, vocab_size, key_size, query_size, value_size,
+    def __init__(self, key_size, query_size, value_size,
                  num_hiddens, norm_shape, ffn_num_input, ffn_num_hiddens,
                  num_heads, num_layers, dropout, use_bias=False, **kwargs):
         super(TransformerEncoder, self).__init__(**kwargs)
         self.num_hiddens = num_hiddens
-        self.embedding = nn.Embedding(vocab_size, num_hiddens)
-        self.pos_encoding = PositionalEncoding(num_hiddens, dropout)
+        # self.pos_encoding = PositionalEncoding(num_hiddens, dropout)
         self.blks = nn.Sequential()
         for i in range(num_layers):
             self.blks.add_module("block" + str(i),
@@ -132,11 +137,12 @@ class TransformerEncoder(nn.Module):
                              norm_shape, ffn_num_input, ffn_num_hiddens,
                              num_heads, dropout, use_bias))
 
-    def forward(self, X, valid_lens, *args):
-        X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
+    def forward(self, X, *args):
+        # X = self.pos_encoding(X * math.sqrt(self.num_hiddens))
+        X = X * math.sqrt(self.num_hiddens)
         self.attention_weights = [None] * len(self.blks)
         for i, blk in enumerate(self.blks):
-            X = blk(X, valid_lens)
+            X = blk(X)
             self.attention_weights[i] = blk.attention.attention.attention_weights
         return X
 

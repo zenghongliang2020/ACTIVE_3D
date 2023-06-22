@@ -1,7 +1,7 @@
 import gym
 import os
 import random
-
+from mmdet3d.core.bbox import DepthInstance3DBoxes
 import numpy as np
 import torch
 import open3d as o3d
@@ -9,18 +9,19 @@ import open3d as o3d
 
 class Active_3d(gym.Env):
     def __init__(self):
-        self.data_root_path = ''
+        self.data_root_path = '/home/zhl/project/Reinforcement Learning/R3AD/mmdetection3d/data/r3ad/data/'
         self.action_space = gym.spaces.Discrete(3)
         self.observation_space = gym.spaces.Box(shape=(5, 256, 259), low=-100, high=100)
         self.train_Home_list = ['Home_3', 'Home_4', 'Home_5', 'Home_6', 'Home_7']
         self.angle_list = ['0', '45', '90', '135', '180', '225', '270', '315']
 
-        self.votenet_pre = torch.load('')
-        self.votenet_train = torch.load('')
+        self.votenet_pre = torch.load('model_V.pkl')
+        self.votenet_train = torch.load('model_V.pkl')
         self.meta = []
+        for i in range(6688):
+            self.meta.append({'box_type_3d':DepthInstance3DBoxes})
 
-        self.done = 0
-        self.step_num = 0
+
 
     def reset(self):
         Home = random.choice(self.train_Home_list)
@@ -28,15 +29,26 @@ class Active_3d(gym.Env):
         self.coors_list = os.listdir(self.data_path)
         self.coor_now = random.choice(self.coors_list)
         self.angle_now = random.choice(self.angle_list)
-        self.obs_buffer = []
-        obs_empty = np.zeros((1, 256, 259))
-        for i in range(4):
-            self.obs_buffer.append(obs_empty)
+        self.obs_buffer = np.zeros((104, 256 * 259))
+        self.step_num = 0
+        self.done = 0
+        cloud_path, _, _, _ = self.path()
+        assert os.path.exists(cloud_path)
+        points = []
+        points.append(self.read_pc(cloud_path))
+        self.bbox_results = self.votenet_train.simple_test(points, self.meta, None, True)
+        obsret = self.votenet_train.backbone.fp_ret
+        obs = torch.cat((obsret['fp_xyz'][0], obsret['fp_features'][0].permute(0, 2, 1)), axis=2)
+        obs = obs.detach().cpu().squeeze().data.numpy()
+        obs = obs.flatten()
+        self.obs_buffer[4] = obs
+        coor_space = self.coor_space()
+        return {'observation': self.obs_buffer[:5], 'mask': coor_space}
 
     def step(self, action):
         coor_int = [int(i) for i in self.coor_now.split(' ')]
-        action_coor = action['coor']
-        action_angle = action['angle']
+        action_coor = action[0]
+        action_angle = action[1]
 
         self.coor_now = self.coor_now_cal(action_coor, coor_int)
         self.angle_now = self.angle_list[action_angle]
@@ -44,20 +56,17 @@ class Active_3d(gym.Env):
         cloud_path, _, _, _ = self.path()
         assert os.path.exists(cloud_path)
         reward, obs = self.reward_cal(cloud_path)
-
-        self.obs_buffer.append(obs.detach().cpu().squeeze())
+        obs = obs.detach().cpu().squeeze().data.numpy().flatten()
+        self.obs_buffer[self.step_num + 5] = obs
 
         coor_space = self.coor_space()
-        action_space = torch.FloatTensor(coor_space)
-
 
         self.step_num += 1
 
-        if self.step_num == 100:
+        if self.step_num == 99:
             self.done = True
 
-        return {'observation': self.obs_buffer[self.step_num - 1: self.step_num + 4],
-                'mask': action_space}, reward, self.done, {}
+        return {'observation': self.obs_buffer[self.step_num : self.step_num + 5], 'mask': coor_space}, reward, self.done, {}
 
     def coor_space(self):
         coor_int = [int(i) for i in self.coor_now.split(' ')]
@@ -91,6 +100,7 @@ class Active_3d(gym.Env):
         return coor_space
 
     def coor_now_cal(self, action_coor, coor_int):
+        coor_now = ' '.join([str(i) for i in [coor_int[0], coor_int[1]]])
         coor_f = ' '.join([str(i) for i in [coor_int[0], coor_int[1] + 1]])
         coor_b = ' '.join([str(i) for i in [coor_int[0], coor_int[1] - 1]])
         coor_l = ' '.join([str(i) for i in [coor_int[0] - 1, coor_int[1]]])
@@ -101,7 +111,7 @@ class Active_3d(gym.Env):
         coor_br = ' '.join([str(i) for i in [coor_int[0] + 1, coor_int[1] - 1]])
         while True:
             if action_coor == 0:
-                return coor_int
+                return coor_now
             elif action_coor == 1:
                 return coor_f
             elif action_coor == 2:
